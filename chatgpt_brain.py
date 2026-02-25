@@ -1,33 +1,55 @@
 import os
-from openai import OpenAI
+import requests
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Set in PowerShell (current terminal):
+#   $env:HF_TOKEN="hf_xxx"
+# Or permanent:
+#   setx HF_TOKEN "hf_xxx"
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-SYSTEM_PROMPT = """You are a friendly voice assistant on Windows 11 named KajuAI.
-You talk briefly and clearly. If the user asks to do something on the laptop,
-respond with a short confirmation and what you did. If it's normal chat, respond naturally.
-"""
+MODEL_ID = "microsoft/Phi-3-mini-4k-instruct"
 
-# Keep short memory
-history = [
-    {"role": "system", "content": SYSTEM_PROMPT}
-]
+# Hugging Face router endpoint (replaces api-inference.huggingface.co)
+API_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL_ID}"
+
+SYSTEM_PROMPT = "You are a friendly Windows voice assistant. Reply briefly and clearly for voice."
+
 
 def chat_reply(user_text: str) -> str:
-    history.append({"role": "user", "content": user_text})
+    if not HF_TOKEN:
+        return "Chat is not configured. Set HF_TOKEN in PowerShell."
 
-    # Using Chat Completions (simple). (Responses API also exists.) :contentReference[oaicite:2]{index=2}
-    resp = client.chat.completions.create(
-        model="gpt-5",  # if your account doesn't have it, use another available model in your dashboard
-        messages=history,
-        temperature=0.6,
-    )
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    prompt = f"{SYSTEM_PROMPT}\n\nUser: {user_text}\nAssistant:"
 
-    reply = resp.choices[0].message.content.strip()
-    history.append({"role": "assistant", "content": reply})
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 120,
+            "temperature": 0.7,
+            "return_full_text": False,
+        },
+    }
 
-    # limit memory
-    if len(history) > 12:
-        history[:] = [history[0]] + history[-10:]
+    try:
+        r = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+    except requests.RequestException:
+        return "Chat service is unreachable right now. Check your internet connection."
 
-    return reply
+    if r.status_code in (401, 403):
+        return "Chat authentication failed. Please update HF_TOKEN."
+    if r.status_code >= 500:
+        return "Chat service is temporarily unavailable. Try again in a moment."
+
+    try:
+        data = r.json()
+    except ValueError:
+        return "Chat service returned an invalid response. Please try again."
+
+    if isinstance(data, dict) and "error" in data:
+        return "Chat request failed. Verify HF_TOKEN and model access."
+
+    if isinstance(data, list) and len(data) > 0:
+        return (data[0].get("generated_text") or "").strip()
+
+    return "Sorry, I could not generate a reply right now."

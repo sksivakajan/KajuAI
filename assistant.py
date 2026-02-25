@@ -1,9 +1,24 @@
+import time
+
 from config import MODE
 from speech.tts import speak
 from speech.stt_online import listen_online
 from speech.stt_offline import listen_offline
-from commands import run_command, smart_parse  # make sure smart_parse exists in commands.py
+from commands import run_actions_from_text, is_action_text
 from chatgpt_brain import chat_reply
+
+
+def should_suppress_chat_reply(reply: str) -> bool:
+    r = (reply or "").lower()
+    blockers = [
+        "chat authentication failed",
+        "chat is not configured",
+        "chat request failed",
+        "chat service is unreachable",
+        "chat service is temporarily unavailable",
+        "chat service returned an invalid response",
+    ]
+    return any(b in r for b in blockers)
 
 
 def listen_auto():
@@ -11,6 +26,8 @@ def listen_auto():
         return listen_online()
     if MODE == "offline":
         return listen_offline()
+
+    # auto: try online then fallback offline
     t = listen_online()
     if t == "__ONLINE_FAILED__":
         return listen_offline()
@@ -21,40 +38,49 @@ def normalize(text: str) -> str:
     return " ".join((text or "").lower().strip().split())
 
 
-def looks_like_action(text: str) -> bool:
-    # if smart_parse will create actions like open/search/whatsapp/etc
-    # we treat it as an action command
-    actions = smart_parse(text)
-    return any(a[0] in ("open", "search", "whatsapp", "shutdown", "restart", "lock") for a in actions)
-
-
 def main():
     speak("Assistant started. Talk to me.")
+    last_text = ""
+    last_text_at = 0.0
 
     while True:
         text = normalize(listen_auto())
         if not text:
             continue
 
-        # If user says "exit"
+        # Ignore duplicate recognition bursts from STT (prevents double open).
+        now = time.time()
+        if text == last_text and (now - last_text_at) < 3.0:
+            continue
+        last_text = text
+        last_text_at = now
+
+        # Stop words
         if text in ["exit", "quit", "stop"]:
             speak("Goodbye.")
             break
 
         try:
-            # If it looks like an action, run it
-            if looks_like_action(text):
-                run_command(text)
+            # If user said an action sentence, do actions
+            if is_action_text(text):
+                handled = run_actions_from_text(text)
+                if not handled:
+                    # if not handled as action, treat as chat
+                    reply = chat_reply(text)
+                    if not should_suppress_chat_reply(reply):
+                        speak(reply)
             else:
-                # Otherwise: normal conversation like ChatGPT
+                # Normal chat -> ChatGPT reply
                 reply = chat_reply(text)
-                speak(reply)
+                if not should_suppress_chat_reply(reply):
+                    speak(reply)
 
-        except KeyboardInterrupt:
-            break
         except Exception as e:
             speak(f"Sorry, error: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nAssistant stopped.")

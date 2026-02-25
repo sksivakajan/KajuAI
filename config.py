@@ -12,5 +12,9 @@ APPS = {
     "calculator": "calc.exe",
 }
 
+# Personal links
+# Set your exact profile URL, e.g. "https://www.linkedin.com/in/your-id/"
+LINKEDIN_PROFILE_URL = ""
+
 # Vosk model path
 VOSK_MODEL_PATH = "model"
