@@ -1,4 +1,5 @@
 # KajuAI
+<img width="1851" height="865" alt="image" src="https://github.com/user-attachments/assets/22876212-2569-4bad-b07c-289ae7abfcce" />
 
 KajuAI is a Windows voice assistant that can:
 - Listen in online, offline, or auto mode
